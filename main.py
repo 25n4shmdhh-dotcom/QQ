@@ -4,8 +4,8 @@ import json
 import os
 import threading
 import time
-from pathlib import Path
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk, messagebox
 
 APP_NAME = "QQ关键词自动回复"
@@ -41,7 +41,6 @@ class BotRunner:
     def __init__(self, logger, status):
         self.logger = logger
         self.status = status
-        self.thread = None
         self.loop = None
         self.ws = None
         self.api = None
@@ -58,8 +57,7 @@ class BotRunner:
             raise ValueError("请先填写 AppID 和 AppSecret。")
         self.running = True
         self.status(True)
-        self.thread = threading.Thread(target=self._thread_main, args=(cfg,), daemon=True)
-        self.thread.start()
+        threading.Thread(target=self._thread_main, args=(cfg,), daemon=True).start()
 
     def stop(self):
         self.running = False
@@ -74,9 +72,14 @@ class BotRunner:
     def _thread_main(self, cfg):
         try:
             from qqbot_agent_sdk import QQApiClient, QQWebSocket, WSCallbacks, EventParser
+
             self.loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.loop)
-            self.api = QQApiClient(app_id=cfg["app_id"], client_secret=cfg["app_secret"])
+            self.api = QQApiClient(
+                app_id=cfg["app_id"],
+                client_secret=cfg["app_secret"],
+                log_tag="KeywordReply"
+            )
             parser = EventParser()
 
             async def on_message(event_type, raw):
@@ -85,7 +88,7 @@ class BotRunner:
                     if not event:
                         return
                     text = (event.content or "").strip()
-                    if not text:
+                    if not text or event.chat_scope != "group":
                         return
 
                     keywords = sorted(
@@ -94,9 +97,6 @@ class BotRunner:
                     )
                     hit = next((k for k in keywords if k in text), None)
                     if not hit:
-                        return
-
-                    if event.chat_scope != "group":
                         return
 
                     groups = [x.strip() for x in cfg["groups"] if x.strip()]
@@ -109,9 +109,7 @@ class BotRunner:
                         return
 
                     await self.api.send_text(
-                        "group",
-                        event.chat_id,
-                        cfg["reply"],
+                        "group", event.chat_id, cfg["reply"],
                         reply_to=event.message_id
                     )
                     self.last_reply = now
@@ -119,20 +117,27 @@ class BotRunner:
                 except Exception as e:
                     self.log("处理消息失败：" + str(e))
 
-            def get_token():
-                return self.api.ensure_token_sync()
-
-            def get_gateway():
-                return self.api.get_gateway_url_sync()
-
+            # 当前 qqbot-agent-sdk 版本要求这些 WSCallbacks 参数。
+            # 暂不使用 Resume，会话信息由 SDK 重新建立。
             self.ws = QQWebSocket(
                 callbacks=WSCallbacks(
                     on_message_event=on_message,
-                    get_token=get_token,
-                    get_gateway_url=get_gateway,
+                    get_token=self.api.ensure_token_sync,
+                    get_gateway_url=self.api.get_gateway_url_sync,
+                    get_session=lambda: (None, None),
+                    set_session=lambda session_id, seq: None,
+                    set_heartbeat_interval=lambda interval: self.log(
+                        f"QQ 心跳间隔：{interval} 秒"
+                    ),
+                    clear_token=self.api.clear_token,
+                    fail_pending=lambda reason: self.log(
+                        "待处理请求失败：" + str(reason)
+                    ),
                     on_connected=lambda: self.log("✓ QQ WebSocket 已连接"),
-                    on_disconnected=lambda: self.log("⚠ QQ WebSocket 已断开，SDK 将按其机制处理重连"),
-                    on_fatal_error=lambda code, msg: self.log(f"✗ 致命错误 [{code}] {msg}")
+                    on_disconnected=lambda: self.log("⚠ QQ WebSocket 已断开"),
+                    on_fatal_error=lambda code, msg: self.log(
+                        f"✗ 致命错误 [{code}] {msg}"
+                    ),
                 ),
                 log_tag="KeywordReply"
             )
@@ -143,6 +148,7 @@ class BotRunner:
             self.ws.start(gateway, self.loop)
             self.log("机器人已启动，等待群消息……")
             self.loop.run_forever()
+
         except Exception as e:
             self.log("启动失败：" + str(e))
         finally:
@@ -165,13 +171,9 @@ class App:
 
         outer = ttk.Frame(root, padding=18)
         outer.pack(fill="both", expand=True)
-
         ttk.Label(outer, text=APP_NAME, font=("Microsoft YaHei UI", 19, "bold")).pack(anchor="w")
-        ttk.Label(
-            outer,
-            text="检测群消息中的关键词，命中后自动回复指定内容",
-            foreground="#666"
-        ).pack(anchor="w", pady=(3, 14))
+        ttk.Label(outer, text="检测群消息中的关键词，命中后自动回复指定内容",
+                  foreground="#666").pack(anchor="w", pady=(3, 14))
 
         auth = ttk.LabelFrame(outer, text="QQ 机器人配置", padding=12)
         auth.pack(fill="x")
@@ -179,7 +181,6 @@ class App:
         self.app_id = ttk.Entry(auth, width=65)
         self.app_id.grid(row=0, column=1, sticky="ew", padx=8)
         self.app_id.insert(0, self.cfg["app_id"])
-
         ttk.Label(auth, text="AppSecret").grid(row=1, column=0, sticky="w", pady=5)
         self.secret = ttk.Entry(auth, width=65, show="•")
         self.secret.grid(row=1, column=1, sticky="ew", padx=8)
@@ -221,12 +222,9 @@ class App:
         self.logbox = tk.Text(box, height=15, state="disabled", bg="#111", fg="#ddd",
                               font=("Consolas", 9))
         self.logbox.pack(fill="both", expand=True)
-
-        ttk.Label(
-            outer,
-            text="AppSecret 只保存在本机 %APPDATA%\\QQKeywordAutoReply\\config.json，请勿发给他人。",
-            foreground="#777"
-        ).pack(anchor="w", pady=(8, 0))
+        ttk.Label(outer,
+                  text="AppSecret 只保存在本机 %APPDATA%\QQKeywordAutoReply\config.json，请勿发给他人。",
+                  foreground="#777").pack(anchor="w", pady=(8, 0))
 
     def get_cfg(self):
         try:
@@ -284,5 +282,5 @@ class App:
 if __name__ == "__main__":
     root = tk.Tk()
     app = App(root)
-    root.protocol("WM_DELETE_WINDOW", lambda: app.close())
+    root.protocol("WM_DELETE_WINDOW", app.close)
     root.mainloop()
