@@ -1,15 +1,26 @@
-你之前看到的 Node.js 报错不会再出现。
+QQ关键词自动回复 v3
 
-这个版本改为纯 Python + 腾讯官方 qqbot-agent-sdk 思路：
-1. Windows 电脑安装 Python 3.11+（仅在你自己本机打包时需要）。
-2. 双击 build_windows.bat。
-3. 完成后得到 dist\QQ关键词自动回复.exe。
-4. 以后只需运行这个 EXE。
-5. 填 AppID、AppSecret。
-6. 默认关键词：有意 / 有意愿 / 有意者 / 有意向。
-7. 命中群消息后回复 1。
+功能：
+- 监听 QQ 群消息
+- 消息包含“有意 / 有意愿 / 有意者 / 有意向”时自动回复“1”
+- 可自定义关键词、回复内容、冷却时间和指定群 ID
 
-如果你不想在电脑安装 Python：
-把整个工程上传到 GitHub，GitHub Actions 会在 Windows 云主机上自动构建 EXE，下载 Actions 生成的 artifact 即可。
+使用：
+1. 在 QQ 开放平台取得 AppID 和 AppSecret。
+2. 运行 EXE。
+3. 填写 AppID、AppSecret。
+4. 确认关键词、回复内容、冷却时间、群 ID。
+5. 点击“保存配置”。
+6. 点击“启动机器人”。
+7. 查看运行日志。
 
-本程序基于腾讯当前公开的 qqbot-agent-sdk 接口设计，实际可监听的群消息范围仍取决于 QQ 开放平台给机器人开通的权限。
+本版本修复：
+- WSCallbacks 缺少当前 SDK 必需参数
+- HTTP client not initialized - not connected
+- 使用官方 SDK 当前示例的 httpx.AsyncClient + QQApiClient.setup() 初始化方式
+
+配置位置：
+%APPDATA%\QQKeywordAutoReply\config.json
+
+安全：
+AppSecret 不要发给他人或上传到 GitHub。

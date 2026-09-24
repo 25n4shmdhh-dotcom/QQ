@@ -5,6 +5,7 @@ import os
 import threading
 import time
 import tkinter as tk
+import httpx
 from pathlib import Path
 from tkinter import ttk, messagebox
 
@@ -44,6 +45,7 @@ class BotRunner:
         self.loop = None
         self.ws = None
         self.api = None
+        self.http_client = None
         self.running = False
         self.last_reply = 0.0
 
@@ -75,11 +77,17 @@ class BotRunner:
 
             self.loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.loop)
+            # 当前官方 SDK 示例要求先创建 httpx.AsyncClient，
+            # 再通过 QQApiClient.setup() 注入 HTTP 客户端。
+            self.http_client = httpx.AsyncClient(timeout=60.0)
+
             self.api = QQApiClient(
                 app_id=cfg["app_id"],
                 client_secret=cfg["app_secret"],
                 log_tag="KeywordReply"
             )
+            self.api.setup(self.http_client)
+
             parser = EventParser()
 
             async def on_message(event_type, raw):
@@ -138,6 +146,7 @@ class BotRunner:
                     on_fatal_error=lambda code, msg: self.log(
                         f"✗ 致命错误 [{code}] {msg}"
                     ),
+                    on_heartbeat_ack=lambda: None,
                 ),
                 log_tag="KeywordReply"
             )
@@ -155,10 +164,20 @@ class BotRunner:
             self.running = False
             self.status(False)
             try:
+                if self.loop and self.http_client:
+                    self.loop.run_until_complete(
+                        self.http_client.aclose()
+                    )
+            except Exception:
+                pass
+
+            try:
                 if self.loop:
                     self.loop.close()
             except Exception:
                 pass
+
+            self.http_client = None
 
 class App:
     def __init__(self, root):
